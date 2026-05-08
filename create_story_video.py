@@ -4,6 +4,7 @@ import time
 import pyttsx3
 from config.settings import *
 from config.topics import TOPICS
+from config.run_config import *
 
 from moviepy.editor import (
     ImageClip,
