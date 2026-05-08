@@ -85,7 +85,15 @@ def choose_motion_from_mood(mood, motion_choices):
     return random.choice(motion_choices)
 
 
-topic = random.choice(TOPICS)
+# -----------------------------
+# LOAD TOPIC
+# -----------------------------
+ui_topic = os.environ.get("UI_TOPIC", "").strip()
+
+if ui_topic:
+    topic = ui_topic
+else:
+    topic = CUSTOM_TOPIC
 
 user_prompt = f"""
 Write a short emotional story about {topic}.
