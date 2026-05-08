@@ -37,6 +37,10 @@ os.makedirs(AUDIO_FOLDER, exist_ok=True)
 os.makedirs(VIDEO_FOLDER, exist_ok=True)
 
 
+def progress(percent, message):
+    print(f"[PROGRESS] {percent} | {message}", flush=True)
+
+
 def add_motion_effect(clip, motion_type="zoom_in", duration=3):
     if motion_type == "zoom_in":
         clip = clip.resize(lambda t: 1.00 + 0.12 * (t / duration))
@@ -85,6 +89,8 @@ def choose_motion_from_mood(mood, motion_choices):
     return random.choice(motion_choices)
 
 
+progress(5, "Starting CineForge pipeline")
+
 # -----------------------------
 # LOAD TOPIC
 # -----------------------------
@@ -111,6 +117,11 @@ Keep it under 60 seconds.
 
 print(f"Selected topic: {topic}")
 
+# -----------------------------
+# GENERATE STORY
+# -----------------------------
+progress(10, "Generating story")
+
 story_engine = StoryEngine()
 story = story_engine.expand_prompt(user_prompt)
 
@@ -121,13 +132,16 @@ print("\nGenerated Story:\n")
 print(story)
 print("Hook:", hook_text)
 
+# -----------------------------
+# SPLIT INTO SCENES
+# -----------------------------
+progress(20, "Splitting story into scenes")
 
 raw_sentences = story.replace("\n", " ").split(".")
 sentences = [s.strip() for s in raw_sentences if s.strip()]
 
 scenes = []
 buffer = ""
-MAX_WORDS_PER_SCENE = 18
 
 for sentence in sentences:
     buffer += sentence + ". "
@@ -145,10 +159,18 @@ if MAX_SCENES:
 
 print(f"Rendering {len(scenes)} scenes")
 
+# -----------------------------
+# CHARACTER CONSISTENCY
+# -----------------------------
+progress(25, "Analyzing character identity")
 
 character_engine = CharacterEngine()
 character_engine.extract_characters(story)
 
+# -----------------------------
+# AUDIO: HOOK + STORY
+# -----------------------------
+progress(30, "Creating voice narration")
 
 engine = pyttsx3.init()
 
@@ -163,12 +185,19 @@ engine.runAndWait()
 
 print("Local voice narration created")
 
+# -----------------------------
+# GENERATE IMAGES
+# -----------------------------
+progress(40, "Generating cinematic images")
 
 director = ShotDirector()
 broll_engine = BrollEngine()
 
 image_paths = []
 shot_data_list = []
+
+total_expected_shots = len(scenes) * SHOTS_PER_SCENE
+completed_shots = 0
 
 for i, scene in enumerate(scenes):
     shot_sequence = director.generate_shot_sequence(scene, i, len(scenes))
@@ -178,12 +207,11 @@ for i, scene in enumerate(scenes):
         prompt = character_engine.enhance_prompt(scene, base_prompt)
 
         prompt_words = prompt.split()
-        MAX_PROMPT_WORDS = 55
 
-        if len(prompt_words) > MAX_PROMPT_WORDS:
-            prompt = " ".join(prompt_words[:MAX_PROMPT_WORDS])
+        if len(prompt_words) > PROMPT_MAX_WORDS:
+            prompt = " ".join(prompt_words[:PROMPT_MAX_WORDS])
 
-        if j == 0 and broll_engine.should_add_broll(scene):
+        if ENABLE_BROLL and j == 0 and broll_engine.should_add_broll(scene):
             print(f"Adding B-roll for scene {i + 1}")
             prompt = broll_engine.generate_broll_prompt(scene)
 
@@ -210,8 +238,16 @@ for i, scene in enumerate(scenes):
         image_paths.append(image_file)
         shot_data_list.append(shot_data)
 
+        completed_shots += 1
+        image_progress = 40 + int((completed_shots / max(total_expected_shots, 1)) * 20)
+        progress(image_progress, f"Generated image {i + 1}-{j + 1}")
+
 print("Scene images generated")
 
+# -----------------------------
+# VIDEO BUILD
+# -----------------------------
+progress(65, "Building video timeline")
 
 clips = []
 
@@ -233,10 +269,10 @@ for i, img in enumerate(image_paths):
 
     clip = ImageClip(img).set_duration(shot_duration)
 
-    mood = shot_data.get("mood", "")
-    motion = choose_motion_from_mood(mood, motion_choices)
-
-    clip = add_motion_effect(clip, motion, shot_duration)
+    if ENABLE_MOTION:
+        mood = shot_data.get("mood", "")
+        motion = choose_motion_from_mood(mood, motion_choices)
+        clip = add_motion_effect(clip, motion, shot_duration)
 
     emotion = shot_data.get("emotion", "neutral")
 
@@ -274,7 +310,9 @@ video = concatenate_videoclips(
 
 video = video.resize((OUTPUT_WIDTH, OUTPUT_HEIGHT))
 
-
+# -----------------------------
+# HOOK OVERLAY FUNCTION
+# -----------------------------
 def create_hook_text(text):
     img = Image.new("RGBA", (OUTPUT_WIDTH, OUTPUT_HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
@@ -310,22 +348,26 @@ def create_hook_text(text):
 
     return np.array(img)
 
+# -----------------------------
+# HOOK + CAPTIONS
+# -----------------------------
+progress(75, "Adding hook overlay and captions")
 
-hook_img = create_hook_text(hook_text)
+if ENABLE_HOOK:
+    hook_img = create_hook_text(hook_text)
 
-hook_clip = (
-    ImageClip(hook_img)
-    .set_start(0)
-    .set_duration(2.0)
-    .set_position(("center", "center"))
-)
+    hook_clip = (
+        ImageClip(hook_img)
+        .set_start(0)
+        .set_duration(2.0)
+        .set_position(("center", "center"))
+    )
 
-video = CompositeVideoClip([video, hook_clip])
+    video = CompositeVideoClip([video, hook_clip])
 
-print("Hook overlay added")
+    print("Hook overlay added")
 
-
-if CAPTION_MODE == "FAST":
+if ENABLE_CAPTIONS and CAPTION_MODE == "FAST":
 
     def create_caption(text):
         img = Image.new("RGBA", (OUTPUT_WIDTH, 200), (0, 0, 0, 0))
@@ -349,10 +391,9 @@ if CAPTION_MODE == "FAST":
 
     words = narration_text.split()
 
-    group_size = 3
     groups = [
-        " ".join(words[i:i + group_size])
-        for i in range(0, len(words), group_size)
+        " ".join(words[i:i + CAPTION_GROUP_SIZE])
+        for i in range(0, len(words), CAPTION_GROUP_SIZE)
     ]
 
     group_duration = video.duration / len(groups)
@@ -378,52 +419,70 @@ if CAPTION_MODE == "FAST":
 
     print("Viral captions added")
 
-elif CAPTION_MODE == "WHISPER":
+elif ENABLE_CAPTIONS and CAPTION_MODE == "WHISPER":
     print("Whisper captions not yet implemented")
 
+# -----------------------------
+# MUSIC
+# -----------------------------
+progress(85, "Adding music and sound effects")
 
 music_clips = []
 
-for i, scene in enumerate(scenes):
-    emotion = director.detect_emotion(scene, i, len(scenes))
+if ENABLE_MUSIC:
+    for i, scene in enumerate(scenes):
+        emotion = director.detect_emotion(scene, i, len(scenes))
 
-    music_path = generate_music(
-        emotion=emotion,
-        duration=scene_duration + 1
-    )
+        music_path = generate_music(
+            emotion=emotion,
+            duration=scene_duration + 1
+        )
 
-    music_clip = AudioFileClip(music_path).volumex(0.08)
-    music_clip = music_clip.set_start(i * scene_duration)
+        music_clip = AudioFileClip(music_path).volumex(0.08)
+        music_clip = music_clip.set_start(i * scene_duration)
 
-    music_clips.append(music_clip)
+        music_clips.append(music_clip)
 
-print("Scene-based music generated")
+    print("Scene-based music generated")
+else:
+    print("Music disabled")
 
-
+# -----------------------------
+# SOUND EFFECTS
+# -----------------------------
 sfx_clips = []
 
-whoosh_path = os.path.join("assets", "sfx", "whoosh.mp3")
-hit_path = os.path.join("assets", "sfx", "hit.mp3")
+if ENABLE_SFX:
+    whoosh_path = os.path.join("assets", "sfx", "whoosh.mp3")
+    hit_path = os.path.join("assets", "sfx", "hit.mp3")
 
-if os.path.exists(whoosh_path):
-    print("Whoosh SFX loaded")
-    whoosh = AudioFileClip(whoosh_path).volumex(0.4).set_start(0)
-    sfx_clips.append(whoosh)
+    if os.path.exists(whoosh_path):
+        print("Whoosh SFX loaded")
+        whoosh = AudioFileClip(whoosh_path).volumex(0.4).set_start(0)
+        sfx_clips.append(whoosh)
 
-if os.path.exists(hit_path):
-    print("Hit SFX loaded")
-    hit = AudioFileClip(hit_path).volumex(0.4).set_start(1.5)
-    sfx_clips.append(hit)
+    if os.path.exists(hit_path):
+        print("Hit SFX loaded")
+        hit = AudioFileClip(hit_path).volumex(0.4).set_start(1.5)
+        sfx_clips.append(hit)
 
-print(f"Total SFX: {len(sfx_clips)}")
+    print(f"Total SFX: {len(sfx_clips)}")
+else:
+    print("SFX disabled")
 
-
+# -----------------------------
+# FINAL AUDIO MIX
+# -----------------------------
 final_audio = CompositeAudioClip(
     [audio.set_start(0.2)] + music_clips + sfx_clips
 )
 
 video = video.set_audio(final_audio)
 
+# -----------------------------
+# EXPORT
+# -----------------------------
+progress(95, "Exporting final video")
 
 output_file = os.path.join(
     VIDEO_FOLDER,
@@ -446,6 +505,7 @@ video.write_videofile(
 
 print("Using codec:", "h264_nvenc")
 
+progress(100, "Video generation complete")
 
 
 
