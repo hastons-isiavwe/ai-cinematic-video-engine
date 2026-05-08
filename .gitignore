@@ -1,0 +1,16 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.tmp
+*.wav
+*.mp3
+*.mp4
+images/
+audio/
+videos/
+temp/
+.idea/
+.vscode/
