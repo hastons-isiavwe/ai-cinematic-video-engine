@@ -87,6 +87,7 @@ video {
 
 
 def get_latest_video():
+
     if not os.path.exists(VIDEO_DIR):
         return None
 
@@ -103,6 +104,7 @@ def get_latest_video():
 
 
 def get_mode_settings(mode):
+
     if mode == "DEV":
         return {
             "max_scenes": 2,
@@ -137,6 +139,7 @@ def get_mode_settings(mode):
 
 
 def write_runtime_config(topic, mode, enable_captions):
+
     settings = get_mode_settings(mode)
 
     config_text = f'''# -----------------------------
@@ -187,9 +190,11 @@ STORY_FILE = "stories/story1.txt"
 
 
 def generate_video(topic, mode, enable_captions):
+
     topic = topic.strip() or "African folktale about wisdom"
 
     topic_file = os.path.join(PROJECT_DIR, "stories", "ui_topic.txt")
+
     os.makedirs(os.path.dirname(topic_file), exist_ok=True)
 
     with open(topic_file, "w", encoding="utf-8") as f:
@@ -212,25 +217,60 @@ def generate_video(topic, mode, enable_captions):
     )
 
     live_logs = ""
+    progress_value = 0
+    status_text = "Starting..."
 
     for line in process.stdout:
+
         live_logs += line
-        yield None, live_logs
+
+        if line.startswith("[PROGRESS]"):
+
+            try:
+                progress_data = line.replace("[PROGRESS]", "").strip()
+
+                percent_text, message = progress_data.split("|", 1)
+
+                progress_value = int(percent_text.strip())
+                status_text = message.strip()
+
+            except Exception:
+                pass
+
+        yield (
+            None,
+            live_logs,
+            gr.update(value=progress_value),
+            gr.update(value=f"🎬 {status_text}")
+        )
 
     process.wait()
 
     latest_video = get_latest_video()
 
     if process.returncode != 0:
-        yield None, "❌ Rendering failed.\n\n" + live_logs
+
+        yield (
+            None,
+            "❌ Rendering failed.\n\n" + live_logs,
+            gr.update(value=0),
+            gr.update(value="❌ Render Failed")
+        )
+
         return
 
-    yield latest_video, "✅ Video generated successfully!\n\n" + live_logs
+    yield (
+        latest_video,
+        "✅ Video generated successfully!\n\n" + live_logs,
+        gr.update(value=100),
+        gr.update(value="✅ Render Complete")
+    )
 
 
 with gr.Blocks(title="CineForge Studio") as demo:
 
     with gr.Row(elem_id="studio-header"):
+
         gr.HTML(
             """
             <div>
@@ -241,7 +281,9 @@ with gr.Blocks(title="CineForge Studio") as demo:
         )
 
     with gr.Row():
+
         with gr.Column(scale=1, elem_classes="panel"):
+
             gr.Markdown("### 🎞️ Project")
 
             topic = gr.Textbox(
@@ -268,13 +310,16 @@ with gr.Blocks(title="CineForge Studio") as demo:
             )
 
         with gr.Column(scale=3, elem_classes="center-panel"):
+
             gr.Markdown("### ▶️ Preview Monitor")
+
             video_output = gr.Video(
                 label="Generated Video",
                 height=520
             )
 
         with gr.Column(scale=1, elem_classes="panel"):
+
             gr.Markdown("### ⚙️ Mode Presets")
 
             gr.Markdown(
@@ -291,8 +336,24 @@ with gr.Blocks(title="CineForge Studio") as demo:
             )
 
     with gr.Row(elem_id="timeline-box"):
+
         with gr.Column(elem_classes="panel"):
+
             gr.Markdown("### 🧵 Timeline / Live System Log")
+
+            progress_status = gr.Markdown(
+                "🎬 Waiting to render..."
+            )
+
+            progress_bar = gr.Slider(
+                minimum=0,
+                maximum=100,
+                value=0,
+                step=1,
+                interactive=False,
+                label="Render Progress"
+            )
+
             log_output = gr.Textbox(
                 label="",
                 lines=18,
@@ -308,17 +369,19 @@ with gr.Blocks(title="CineForge Studio") as demo:
         ],
         outputs=[
             video_output,
-            log_output
+            log_output,
+            progress_bar,
+            progress_status
         ]
     )
 
 
 if __name__ == "__main__":
+
     demo.launch(
         css=CUSTOM_CSS,
         theme=gr.themes.Base()
     )
-
 
 
 

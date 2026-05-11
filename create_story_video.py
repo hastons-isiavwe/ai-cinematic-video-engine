@@ -2,6 +2,8 @@ import os
 import random
 import time
 import pyttsx3
+from pathlib import Path
+import json
 from config.settings import *
 from config.topics import TOPICS
 from config.run_config import *
@@ -27,14 +29,39 @@ from intelligence.character_engine import CharacterEngine
 from intelligence.hook_engine import HookEngine
 
 
-STORY_FILE = "stories/story1.txt"
-IMAGE_FOLDER = "images"
-AUDIO_FOLDER = "audio"
-VIDEO_FOLDER = "videos"
+# ---------------------------------
+# RUONEX PROJECT SYSTEM
+# ---------------------------------
 
-os.makedirs(IMAGE_FOLDER, exist_ok=True)
-os.makedirs(AUDIO_FOLDER, exist_ok=True)
-os.makedirs(VIDEO_FOLDER, exist_ok=True)
+PROJECT_ID = os.environ.get(
+    "PROJECT_ID",
+    "african_wisdom_story"
+)
+
+RUONEX_ROOT = Path(
+    r"C:\Users\14439\OneDrive\Desktop\AI-Tools\RuoNex_AI"
+)
+
+PROJECT_DIR = RUONEX_ROOT / "projects" / PROJECT_ID
+
+PROJECT_FILE = PROJECT_DIR / "project.json"
+
+IMAGE_FOLDER = PROJECT_DIR / "images"
+AUDIO_FOLDER = PROJECT_DIR / "audio"
+VIDEO_FOLDER = PROJECT_DIR / "videos"
+EXPORT_FOLDER = PROJECT_DIR / "exports"
+STORY_FOLDER = PROJECT_DIR / "story"
+
+STORY_FILE = STORY_FOLDER / "script.txt"
+
+IMAGE_FOLDER.mkdir(parents=True, exist_ok=True)
+AUDIO_FOLDER.mkdir(parents=True, exist_ok=True)
+VIDEO_FOLDER.mkdir(parents=True, exist_ok=True)
+EXPORT_FOLDER.mkdir(parents=True, exist_ok=True)
+STORY_FOLDER.mkdir(parents=True, exist_ok=True)
+
+print(f"[RUONEX] Using project: {PROJECT_ID}")
+print(f"[RUONEX] Project directory: {PROJECT_DIR}")
 
 
 def progress(percent, message):
@@ -348,6 +375,30 @@ def create_hook_text(text):
 
     return np.array(img)
 
+def update_project_json(final_video_path):
+    if not PROJECT_FILE.exists():
+        return
+
+    with open(PROJECT_FILE, "r", encoding="utf-8") as f:
+        project_data = json.load(f)
+
+    project_data["story"]["topic"] = topic
+    project_data["story"]["script_path"] = "story/script.txt"
+
+    project_data["audio_assets"]["narration"] = "audio/narration.wav"
+
+    project_data["video_assets"]["images_dir"] = "images/"
+    project_data["video_assets"]["raw_video_dir"] = "videos/raw/"
+    project_data["video_assets"]["final_video"] = (
+        f"exports/{Path(final_video_path).name}"
+    )
+
+    project_data["settings"]["captions"] = ENABLE_CAPTIONS
+    project_data["settings"]["mode"] = UI_MODE
+
+    with open(PROJECT_FILE, "w", encoding="utf-8") as f:
+        json.dump(project_data, f, indent=2)
+
 # -----------------------------
 # HOOK + CAPTIONS
 # -----------------------------
@@ -484,13 +535,12 @@ video = video.set_audio(final_audio)
 # -----------------------------
 progress(95, "Exporting final video")
 
-output_file = os.path.join(
-    VIDEO_FOLDER,
+output_file = EXPORT_FOLDER / (
     f"{topic.replace(' ', '_')}_{int(time.time())}.mp4"
 )
 
 video.write_videofile(
-    output_file,
+    str(output_file),
     fps=FPS,
     codec="h264_nvenc",
     audio_codec="aac",
@@ -504,6 +554,9 @@ video.write_videofile(
 )
 
 print("Using codec:", "h264_nvenc")
+
+update_project_json(output_file)
+print("[RUONEX] project.json updated")
 
 progress(100, "Video generation complete")
 
