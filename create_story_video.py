@@ -550,12 +550,21 @@ if use_satb and satb_stems:
 
     print("[RUONEX] Loading SATB soundtrack")
 
+    satb_config = project_data.get("satb_soundtrack", {})
+
+    satb_volume = satb_config.get("volume", 0.035)
+    satb_ducking_volume = satb_config.get("ducking_volume", 0.018)
+    satb_fade_in = satb_config.get("fade_in", 2.0)
+    satb_fade_out = satb_config.get("fade_out", 2.0)
+
     for part, path in satb_stems.items():
 
         try:
             choir_clip = (
                 AudioFileClip(str(path))
-                .volumex(0.035)
+                .volumex(satb_ducking_volume)
+                .audio_fadein(satb_fade_in)
+                .audio_fadeout(satb_fade_out)
             )
 
             satb_audio_clips.append(choir_clip)
@@ -564,9 +573,7 @@ if use_satb and satb_stems:
 
         except Exception as e:
             print(f"[RUONEX] Failed loading {part}: {e}")
-
-else:
-    print("[RUONEX] SATB soundtrack disabled")
+            
 
 # -----------------------------
 # MUSIC
