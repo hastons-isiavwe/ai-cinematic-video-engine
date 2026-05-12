@@ -64,6 +64,84 @@ print(f"[RUONEX] Using project: {PROJECT_ID}")
 print(f"[RUONEX] Project directory: {PROJECT_DIR}")
 
 
+# ---------------------------------
+# PROJECT JSON HELPERS (MOVED UP)
+# ---------------------------------
+
+def load_project_json():
+    if not PROJECT_FILE.exists():
+        print("[RUONEX] project.json not found")
+        return {}
+
+    with open(PROJECT_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def detect_satb_stems():
+    project_data = load_project_json()
+
+    stems = (
+        project_data
+        .get("audio_assets", {})
+        .get("stems", {})
+    )
+
+    required = ["soprano", "alto", "tenor", "bass"]
+
+    detected = {}
+
+    for part in required:
+        rel_path = stems.get(part, "")
+
+        if not rel_path:
+            continue
+
+        stem_path = PROJECT_DIR / rel_path
+
+        if stem_path.exists():
+            detected[part] = stem_path
+
+    if len(detected) == 4:
+        print("[RUONEX] SATB stems detected")
+
+        for part, path in detected.items():
+            print(f"[RUONEX] {part}: {path}")
+
+    else:
+        print("[RUONEX] SATB stems not fully available")
+
+    return detected
+
+
+def update_project_json(final_video_path):
+    if not PROJECT_FILE.exists():
+        return
+
+    with open(PROJECT_FILE, "r", encoding="utf-8") as f:
+        project_data = json.load(f)
+
+    project_data["story"]["topic"] = topic
+    project_data["story"]["script_path"] = "story/script.txt"
+
+    project_data["audio_assets"]["narration"] = "audio/narration.wav"
+
+    project_data["video_assets"]["images_dir"] = "images/"
+    project_data["video_assets"]["raw_video_dir"] = "videos/raw/"
+    project_data["video_assets"]["final_video"] = (
+        f"exports/{Path(final_video_path).name}"
+    )
+
+    project_data["settings"]["captions"] = ENABLE_CAPTIONS
+    project_data["settings"]["mode"] = UI_MODE
+
+    with open(PROJECT_FILE, "w", encoding="utf-8") as f:
+        json.dump(project_data, f, indent=2)
+
+
+# ---------------------------------
+# UTILS
+# ---------------------------------
+
 def progress(percent, message):
     print(f"[PROGRESS] {percent} | {message}", flush=True)
 
@@ -115,6 +193,10 @@ def choose_motion_from_mood(mood, motion_choices):
 
     return random.choice(motion_choices)
 
+
+# ---------------------------------
+# START PIPELINE
+# ---------------------------------
 
 progress(5, "Starting CineForge pipeline")
 
@@ -375,29 +457,7 @@ def create_hook_text(text):
 
     return np.array(img)
 
-def update_project_json(final_video_path):
-    if not PROJECT_FILE.exists():
-        return
-
-    with open(PROJECT_FILE, "r", encoding="utf-8") as f:
-        project_data = json.load(f)
-
-    project_data["story"]["topic"] = topic
-    project_data["story"]["script_path"] = "story/script.txt"
-
-    project_data["audio_assets"]["narration"] = "audio/narration.wav"
-
-    project_data["video_assets"]["images_dir"] = "images/"
-    project_data["video_assets"]["raw_video_dir"] = "videos/raw/"
-    project_data["video_assets"]["final_video"] = (
-        f"exports/{Path(final_video_path).name}"
-    )
-
-    project_data["settings"]["captions"] = ENABLE_CAPTIONS
-    project_data["settings"]["mode"] = UI_MODE
-
-    with open(PROJECT_FILE, "w", encoding="utf-8") as f:
-        json.dump(project_data, f, indent=2)
+satb_stems = detect_satb_stems()
 
 # -----------------------------
 # HOOK + CAPTIONS
@@ -559,8 +619,6 @@ update_project_json(output_file)
 print("[RUONEX] project.json updated")
 
 progress(100, "Video generation complete")
-
-
 
 
 
