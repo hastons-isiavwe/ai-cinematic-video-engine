@@ -65,7 +65,7 @@ print(f"[RUONEX] Project directory: {PROJECT_DIR}")
 
 
 # ---------------------------------
-# PROJECT JSON HELPERS (MOVED UP)
+# PROJECT JSON HELPERS
 # ---------------------------------
 
 def load_project_json():
@@ -103,14 +103,13 @@ def detect_satb_stems():
 
     if len(detected) == 4:
         print("[RUONEX] SATB stems detected")
-
         for part, path in detected.items():
             print(f"[RUONEX] {part}: {path}")
-
     else:
         print("[RUONEX] SATB stems not fully available")
 
     return detected
+
 
 def get_satb_intensity_from_shots(shot_data_list):
     intensity_map = {
@@ -141,7 +140,6 @@ def get_satb_intensity_from_shots(shot_data_list):
 
         if intensity is None:
             intensity = 1.0
-
             for key, value in intensity_map.items():
                 if key in mood:
                     intensity = value
@@ -150,6 +148,64 @@ def get_satb_intensity_from_shots(shot_data_list):
         values.append(intensity)
 
     return sum(values) / len(values)
+
+
+def get_emotional_voice_weights(emotion):
+    emotion = str(emotion).lower()
+
+    routing = {
+        "joy": {
+            "soprano": 1.4,
+            "alto": 0.8,
+            "tenor": 1.0,
+            "bass": 0.7,
+        },
+        "happy": {
+            "soprano": 1.3,
+            "alto": 0.9,
+            "tenor": 1.0,
+            "bass": 0.8,
+        },
+        "love": {
+            "soprano": 1.2,
+            "alto": 1.0,
+            "tenor": 1.3,
+            "bass": 0.8,
+        },
+        "sad": {
+            "soprano": 0.7,
+            "alto": 1.5,
+            "tenor": 1.0,
+            "bass": 0.9,
+        },
+        "reflective": {
+            "soprano": 0.9,
+            "alto": 1.3,
+            "tenor": 1.1,
+            "bass": 0.9,
+        },
+        "fear": {
+            "soprano": 0.6,
+            "alto": 0.8,
+            "tenor": 1.0,
+            "bass": 1.5,
+        },
+        "dramatic": {
+            "soprano": 0.8,
+            "alto": 1.0,
+            "tenor": 1.1,
+            "bass": 1.6,
+        },
+        "neutral": {
+            "soprano": 1.0,
+            "alto": 1.0,
+            "tenor": 1.0,
+            "bass": 1.0,
+        },
+    }
+
+    return routing.get(emotion, routing["neutral"])
+
 
 def update_project_json(final_video_path):
     if not PROJECT_FILE.exists():
@@ -187,30 +243,24 @@ def progress(percent, message):
 def add_motion_effect(clip, motion_type="zoom_in", duration=3):
     if motion_type == "zoom_in":
         clip = clip.resize(lambda t: 1.00 + 0.12 * (t / duration))
-
     elif motion_type == "zoom_out":
         clip = clip.resize(lambda t: 1.12 - 0.12 * (t / duration))
-
     elif motion_type == "pan_left":
         clip = clip.resize(1.20).set_position(
             lambda t: (-120 * (t / duration), "center")
         )
-
     elif motion_type == "pan_right":
         clip = clip.resize(1.20).set_position(
             lambda t: (-120 + 120 * (t / duration), "center")
         )
-
     elif motion_type == "slow_pan":
         clip = clip.resize(1.10).set_position(
             lambda t: (-40 * (t / duration), "center")
         )
-
     elif motion_type == "drift":
         clip = clip.resize(lambda t: 1.03 + 0.05 * (t / duration)).set_position(
             lambda t: (-20 + 40 * (t / duration), -10)
         )
-
     else:
         clip = clip.resize(lambda t: 1.00 + 0.06 * (t / duration))
 
@@ -222,10 +272,8 @@ def choose_motion_from_mood(mood, motion_choices):
 
     if "tense" in mood or "intense" in mood:
         return random.choice(["pan_left", "pan_right", "drift"])
-
     if "peaceful" in mood or "reflective" in mood:
         return random.choice(["zoom_in", "slow_pan"])
-
     if "sad" in mood or "emotional" in mood:
         return "zoom_in"
 
@@ -495,6 +543,7 @@ def create_hook_text(text):
 
     return np.array(img)
 
+
 satb_stems = detect_satb_stems()
 
 # -----------------------------
@@ -513,7 +562,6 @@ if ENABLE_HOOK:
     )
 
     video = CompositeVideoClip([video, hook_clip])
-
     print("Hook overlay added")
 
 if ENABLE_CAPTIONS and CAPTION_MODE == "FAST":
@@ -539,7 +587,6 @@ if ENABLE_CAPTIONS and CAPTION_MODE == "FAST":
         return np.array(img)
 
     words = narration_text.split()
-
     groups = [
         " ".join(words[i:i + CAPTION_GROUP_SIZE])
         for i in range(0, len(words), CAPTION_GROUP_SIZE)
@@ -561,11 +608,9 @@ if ENABLE_CAPTIONS and CAPTION_MODE == "FAST":
         )
 
         txt_clip = txt_clip.resize(lambda t: 1 + 0.05 * (t / group_duration))
-
         caption_clips.append(txt_clip)
 
     video = CompositeVideoClip([video] + caption_clips)
-
     print("Viral captions added")
 
 elif ENABLE_CAPTIONS and CAPTION_MODE == "WHISPER":
@@ -578,6 +623,16 @@ satb_audio_clips = []
 satb_intensity = get_satb_intensity_from_shots(shot_data_list)
 project_data = load_project_json()
 
+dominant_emotion = "neutral"
+if shot_data_list:
+    dominant_emotion = str(
+        shot_data_list[0].get("emotion", "neutral")
+    ).lower()
+
+voice_weights = get_emotional_voice_weights(dominant_emotion)
+
+print(f"[RUONEX] Dominant emotion: {dominant_emotion}")
+
 use_satb = (
     project_data
     .get("settings", {})
@@ -585,7 +640,6 @@ use_satb = (
 )
 
 if use_satb and satb_stems:
-
     print("[RUONEX] Loading SATB soundtrack")
 
     satb_config = project_data.get("satb_soundtrack", {})
@@ -596,25 +650,23 @@ if use_satb and satb_stems:
     satb_fade_out = satb_config.get("fade_out", 2.0)
 
     for part, path in satb_stems.items():
-
+        voice_multiplier = voice_weights.get(part, 1.0)
         try:
             choir_clip = (
                 AudioFileClip(str(path))
-                .volumex(satb_ducking_volume * satb_intensity)
+                .volumex(satb_ducking_volume * satb_intensity * voice_multiplier)
                 .audio_fadein(satb_fade_in)
                 .audio_fadeout(satb_fade_out)
             )
 
             satb_audio_clips.append(choir_clip)
-
             print(f"[RUONEX] Loaded {part} soundtrack")
 
         except Exception as e:
             print(f"[RUONEX] Failed loading {part}: {e}")
-            
 
 # -----------------------------
-# MUSIC
+# MUSIC + SFX
 # -----------------------------
 progress(85, "Adding music and sound effects")
 
@@ -631,7 +683,6 @@ if ENABLE_MUSIC:
 
         music_clip = AudioFileClip(music_path).volumex(0.08)
         music_clip = music_clip.set_start(i * scene_duration)
-
         music_clips.append(music_clip)
 
     print("Scene-based music generated")
@@ -648,27 +699,20 @@ if ENABLE_SFX:
     hit_path = os.path.join("assets", "sfx", "hit.mp3")
 
     if os.path.exists(whoosh_path):
-        print("Whoosh SFX loaded")
         whoosh = AudioFileClip(whoosh_path).volumex(0.4).set_start(0)
         sfx_clips.append(whoosh)
+        print("Whoosh SFX loaded")
 
     if os.path.exists(hit_path):
-        print("Hit SFX loaded")
         hit = AudioFileClip(hit_path).volumex(0.4).set_start(1.5)
         sfx_clips.append(hit)
-
-    print(f"Total SFX: {len(sfx_clips)}")
-else:
-    print("SFX disabled")
+        print("Hit SFX loaded")
 
 # -----------------------------
 # FINAL AUDIO MIX
 # -----------------------------
 final_audio = CompositeAudioClip(
-    [audio.set_start(0.2)]
-    + satb_audio_clips
-    + music_clips
-    + sfx_clips
+    [audio.set_start(0.2)] + satb_audio_clips + music_clips + sfx_clips
 )
 video = video.set_audio(final_audio)
 
@@ -677,31 +721,7 @@ video = video.set_audio(final_audio)
 # -----------------------------
 progress(95, "Exporting final video")
 
-output_file = EXPORT_FOLDER / (
-    f"{topic.replace(' ', '_')}_{int(time.time())}.mp4"
-)
-
-video.write_videofile(
-    str(output_file),
-    fps=FPS,
-    codec="h264_nvenc",
-    audio_codec="aac",
-    temp_audiofile="temp-audio.m4a",
-    remove_temp=True,
-    preset="fast",
-    ffmpeg_params=[
-        "-pix_fmt", "yuv420p",
-        "-movflags", "+faststart"
-    ]
-)
-
-print("Using codec:", "h264_nvenc")
-
-update_project_json(output_file)
-print("[RUONEX] project.json updated")
-
-progress(100, "Video generation complete")
-
+output_file = ...
 
 
 
