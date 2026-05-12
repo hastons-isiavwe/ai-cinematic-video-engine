@@ -112,6 +112,44 @@ def detect_satb_stems():
 
     return detected
 
+def get_satb_intensity_from_shots(shot_data_list):
+    intensity_map = {
+        "joy": 1.25,
+        "happy": 1.20,
+        "love": 1.15,
+        "sad": 0.85,
+        "fear": 0.80,
+        "lonely": 0.75,
+        "action": 1.30,
+        "intense": 1.35,
+        "dramatic": 1.40,
+        "peaceful": 0.90,
+        "reflective": 0.95,
+        "neutral": 1.00,
+    }
+
+    if not shot_data_list:
+        return 1.0
+
+    values = []
+
+    for shot in shot_data_list:
+        emotion = str(shot.get("emotion", "neutral")).lower()
+        mood = str(shot.get("mood", "neutral")).lower()
+
+        intensity = intensity_map.get(emotion)
+
+        if intensity is None:
+            intensity = 1.0
+
+            for key, value in intensity_map.items():
+                if key in mood:
+                    intensity = value
+                    break
+
+        values.append(intensity)
+
+    return sum(values) / len(values)
 
 def update_project_json(final_video_path):
     if not PROJECT_FILE.exists():
@@ -537,7 +575,7 @@ elif ENABLE_CAPTIONS and CAPTION_MODE == "WHISPER":
 # SATB SOUNDTRACK LAYER
 # -----------------------------
 satb_audio_clips = []
-
+satb_intensity = get_satb_intensity_from_shots(shot_data_list)
 project_data = load_project_json()
 
 use_satb = (
@@ -562,7 +600,7 @@ if use_satb and satb_stems:
         try:
             choir_clip = (
                 AudioFileClip(str(path))
-                .volumex(satb_ducking_volume)
+                .volumex(satb_ducking_volume * satb_intensity)
                 .audio_fadein(satb_fade_in)
                 .audio_fadeout(satb_fade_out)
             )
