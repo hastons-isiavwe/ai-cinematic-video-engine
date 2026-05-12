@@ -534,6 +534,41 @@ elif ENABLE_CAPTIONS and CAPTION_MODE == "WHISPER":
     print("Whisper captions not yet implemented")
 
 # -----------------------------
+# SATB SOUNDTRACK LAYER
+# -----------------------------
+satb_audio_clips = []
+
+project_data = load_project_json()
+
+use_satb = (
+    project_data
+    .get("settings", {})
+    .get("use_satb_as_soundtrack", False)
+)
+
+if use_satb and satb_stems:
+
+    print("[RUONEX] Loading SATB soundtrack")
+
+    for part, path in satb_stems.items():
+
+        try:
+            choir_clip = (
+                AudioFileClip(str(path))
+                .volumex(0.035)
+            )
+
+            satb_audio_clips.append(choir_clip)
+
+            print(f"[RUONEX] Loaded {part} soundtrack")
+
+        except Exception as e:
+            print(f"[RUONEX] Failed loading {part}: {e}")
+
+else:
+    print("[RUONEX] SATB soundtrack disabled")
+
+# -----------------------------
 # MUSIC
 # -----------------------------
 progress(85, "Adding music and sound effects")
@@ -585,9 +620,11 @@ else:
 # FINAL AUDIO MIX
 # -----------------------------
 final_audio = CompositeAudioClip(
-    [audio.set_start(0.2)] + music_clips + sfx_clips
+    [audio.set_start(0.2)]
+    + satb_audio_clips
+    + music_clips
+    + sfx_clips
 )
-
 video = video.set_audio(final_audio)
 
 # -----------------------------
