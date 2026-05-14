@@ -4,6 +4,7 @@ import time
 import pyttsx3
 from pathlib import Path
 import json
+
 from config.settings import *
 from config.topics import TOPICS
 from config.run_config import *
@@ -92,7 +93,6 @@ def detect_satb_stems():
 
     for part in required:
         rel_path = stems.get(part, "")
-
         if not rel_path:
             continue
 
@@ -113,17 +113,10 @@ def detect_satb_stems():
 
 def get_satb_intensity_from_shots(shot_data_list):
     intensity_map = {
-        "joy": 1.25,
-        "happy": 1.20,
-        "love": 1.15,
-        "sad": 0.85,
-        "fear": 0.80,
-        "lonely": 0.75,
-        "action": 1.30,
-        "intense": 1.35,
-        "dramatic": 1.40,
-        "peaceful": 0.90,
-        "reflective": 0.95,
+        "joy": 1.25, "happy": 1.20, "love": 1.15,
+        "sad": 0.85, "fear": 0.80, "lonely": 0.75,
+        "action": 1.30, "intense": 1.35, "dramatic": 1.40,
+        "peaceful": 0.90, "reflective": 0.95,
         "neutral": 1.00,
     }
 
@@ -131,13 +124,11 @@ def get_satb_intensity_from_shots(shot_data_list):
         return 1.0
 
     values = []
-
     for shot in shot_data_list:
         emotion = str(shot.get("emotion", "neutral")).lower()
         mood = str(shot.get("mood", "neutral")).lower()
 
         intensity = intensity_map.get(emotion)
-
         if intensity is None:
             intensity = 1.0
             for key, value in intensity_map.items():
@@ -154,57 +145,46 @@ def get_emotional_voice_weights(emotion):
     emotion = str(emotion).lower()
 
     routing = {
-        "joy": {
-            "soprano": 1.4,
-            "alto": 0.8,
-            "tenor": 1.0,
-            "bass": 0.7,
-        },
-        "happy": {
-            "soprano": 1.3,
-            "alto": 0.9,
-            "tenor": 1.0,
-            "bass": 0.8,
-        },
-        "love": {
-            "soprano": 1.2,
-            "alto": 1.0,
-            "tenor": 1.3,
-            "bass": 0.8,
-        },
-        "sad": {
-            "soprano": 0.7,
-            "alto": 1.5,
-            "tenor": 1.0,
-            "bass": 0.9,
-        },
-        "reflective": {
-            "soprano": 0.9,
-            "alto": 1.3,
-            "tenor": 1.1,
-            "bass": 0.9,
-        },
-        "fear": {
-            "soprano": 0.6,
-            "alto": 0.8,
-            "tenor": 1.0,
-            "bass": 1.5,
-        },
-        "dramatic": {
-            "soprano": 0.8,
-            "alto": 1.0,
-            "tenor": 1.1,
-            "bass": 1.6,
-        },
-        "neutral": {
-            "soprano": 1.0,
-            "alto": 1.0,
-            "tenor": 1.0,
-            "bass": 1.0,
-        },
+        "joy": {"soprano": 1.4, "alto": 0.8, "tenor": 1.0, "bass": 0.7},
+        "happy": {"soprano": 1.3, "alto": 0.9, "tenor": 1.0, "bass": 0.8},
+        "love": {"soprano": 1.2, "alto": 1.0, "tenor": 1.3, "bass": 0.8},
+        "sad": {"soprano": 0.7, "alto": 1.5, "tenor": 1.0, "bass": 0.9},
+        "reflective": {"soprano": 0.9, "alto": 1.3, "tenor": 1.1, "bass": 0.9},
+        "fear": {"soprano": 0.6, "alto": 0.8, "tenor": 1.0, "bass": 1.5},
+        "dramatic": {"soprano": 0.8, "alto": 1.0, "tenor": 1.1, "bass": 1.6},
+        "neutral": {"soprano": 1.0, "alto": 1.0, "tenor": 1.0, "bass": 1.0},
     }
 
     return routing.get(emotion, routing["neutral"])
+
+
+def get_story_curve_multiplier(shot_data_list, satb_config):
+    if not satb_config.get("curve_enabled", True):
+        return 1.0
+    if not shot_data_list:
+        return 1.0
+
+    curve_start = satb_config.get("curve_start", 0.75)
+    curve_mid = satb_config.get("curve_mid", 1.0)
+    curve_peak = satb_config.get("curve_peak", 1.35)
+    curve_end = satb_config.get("curve_end", 0.85)
+
+    total = len(shot_data_list)
+    values = []
+
+    for index, _shot in enumerate(shot_data_list):
+        progress = index / max(total - 1, 1)
+
+        if progress < 0.33:
+            multiplier = curve_start + ((curve_mid - curve_start) * (progress / 0.33))
+        elif progress < 0.75:
+            multiplier = curve_mid + ((curve_peak - curve_mid) * ((progress - 0.33) / 0.42))
+        else:
+            multiplier = curve_peak + ((curve_end - curve_peak) * ((progress - 0.75) / 0.25))
+
+        values.append(multiplier)
+
+    return sum(values) / len(values)
 
 
 def update_project_json(final_video_path):
@@ -216,14 +196,11 @@ def update_project_json(final_video_path):
 
     project_data["story"]["topic"] = topic
     project_data["story"]["script_path"] = "story/script.txt"
-
     project_data["audio_assets"]["narration"] = "audio/narration.wav"
 
     project_data["video_assets"]["images_dir"] = "images/"
     project_data["video_assets"]["raw_video_dir"] = "videos/raw/"
-    project_data["video_assets"]["final_video"] = (
-        f"exports/{Path(final_video_path).name}"
-    )
+    project_data["video_assets"]["final_video"] = f"exports/{Path(final_video_path).name}"
 
     project_data["settings"]["captions"] = ENABLE_CAPTIONS
     project_data["settings"]["mode"] = UI_MODE
@@ -246,17 +223,11 @@ def add_motion_effect(clip, motion_type="zoom_in", duration=3):
     elif motion_type == "zoom_out":
         clip = clip.resize(lambda t: 1.12 - 0.12 * (t / duration))
     elif motion_type == "pan_left":
-        clip = clip.resize(1.20).set_position(
-            lambda t: (-120 * (t / duration), "center")
-        )
+        clip = clip.resize(1.20).set_position(lambda t: (-120 * (t / duration), "center"))
     elif motion_type == "pan_right":
-        clip = clip.resize(1.20).set_position(
-            lambda t: (-120 + 120 * (t / duration), "center")
-        )
+        clip = clip.resize(1.20).set_position(lambda t: (-120 + 120 * (t / duration), "center"))
     elif motion_type == "slow_pan":
-        clip = clip.resize(1.10).set_position(
-            lambda t: (-40 * (t / duration), "center")
-        )
+        clip = clip.resize(1.10).set_position(lambda t: (-40 * (t / duration), "center"))
     elif motion_type == "drift":
         clip = clip.resize(lambda t: 1.03 + 0.05 * (t / duration)).set_position(
             lambda t: (-20 + 40 * (t / duration), -10)
@@ -304,7 +275,6 @@ Do NOT repeat this prompt.
 Do NOT say "write a script".
 
 Tell a real story with a character, conflict, and resolution.
-
 Start with a strong hook.
 End with a powerful message.
 Keep it under 60 seconds.
@@ -402,7 +372,6 @@ for i, scene in enumerate(scenes):
         prompt = character_engine.enhance_prompt(scene, base_prompt)
 
         prompt_words = prompt.split()
-
         if len(prompt_words) > PROMPT_MAX_WORDS:
             prompt = " ".join(prompt_words[:PROMPT_MAX_WORDS])
 
@@ -620,18 +589,10 @@ elif ENABLE_CAPTIONS and CAPTION_MODE == "WHISPER":
 # SATB SOUNDTRACK LAYER
 # -----------------------------
 satb_audio_clips = []
+
 satb_intensity = get_satb_intensity_from_shots(shot_data_list)
+
 project_data = load_project_json()
-
-dominant_emotion = "neutral"
-if shot_data_list:
-    dominant_emotion = str(
-        shot_data_list[0].get("emotion", "neutral")
-    ).lower()
-
-voice_weights = get_emotional_voice_weights(dominant_emotion)
-
-print(f"[RUONEX] Dominant emotion: {dominant_emotion}")
 
 use_satb = (
     project_data
@@ -640,6 +601,7 @@ use_satb = (
 )
 
 if use_satb and satb_stems:
+
     print("[RUONEX] Loading SATB soundtrack")
 
     satb_config = project_data.get("satb_soundtrack", {})
@@ -649,83 +611,54 @@ if use_satb and satb_stems:
     satb_fade_in = satb_config.get("fade_in", 2.0)
     satb_fade_out = satb_config.get("fade_out", 2.0)
 
+    satb_curve_multiplier = get_story_curve_multiplier(
+        shot_data_list,
+        satb_config
+    )
+
+    print(f"[RUONEX] SATB curve multiplier: {satb_curve_multiplier:.2f}")
+
+    dominant_emotion = "neutral"
+
+    if shot_data_list:
+        dominant_emotion = str(
+            shot_data_list[0].get("emotion", "neutral")
+        ).lower()
+
+    voice_weights = get_emotional_voice_weights(dominant_emotion)
+
+    print(f"[RUONEX] Dominant emotion: {dominant_emotion}")
+
     for part, path in satb_stems.items():
+
         voice_multiplier = voice_weights.get(part, 1.0)
+
         try:
-            choir_clip = (
-                AudioFileClip(str(path))
-                .volumex(satb_ducking_volume * satb_intensity * voice_multiplier)
-                .audio_fadein(satb_fade_in)
-                .audio_fadeout(satb_fade_out)
+            choir_clip = AudioFileClip(str(path))
+
+            choir_volume = (
+                satb_ducking_volume
+                * satb_intensity
+                * satb_curve_multiplier
+                * voice_multiplier
             )
 
+            choir_clip = choir_clip.volumex(choir_volume)
+            choir_clip = choir_clip.audio_fadein(satb_fade_in)
+            choir_clip = choir_clip.audio_fadeout(satb_fade_out)
+
             satb_audio_clips.append(choir_clip)
-            print(f"[RUONEX] Loaded {part} soundtrack")
+
+            print(
+                f"[RUONEX] Loaded {part} soundtrack "
+                f"(x{voice_multiplier})"
+            )
 
         except Exception as e:
             print(f"[RUONEX] Failed loading {part}: {e}")
 
-# -----------------------------
-# MUSIC + SFX
-# -----------------------------
-progress(85, "Adding music and sound effects")
-
-music_clips = []
-
-if ENABLE_MUSIC:
-    for i, scene in enumerate(scenes):
-        emotion = director.detect_emotion(scene, i, len(scenes))
-
-        music_path = generate_music(
-            emotion=emotion,
-            duration=scene_duration + 1
-        )
-
-        music_clip = AudioFileClip(music_path).volumex(0.08)
-        music_clip = music_clip.set_start(i * scene_duration)
-        music_clips.append(music_clip)
-
-    print("Scene-based music generated")
 else:
-    print("Music disabled")
-
-# -----------------------------
-# SOUND EFFECTS
-# -----------------------------
-sfx_clips = []
-
-if ENABLE_SFX:
-    whoosh_path = os.path.join("assets", "sfx", "whoosh.mp3")
-    hit_path = os.path.join("assets", "sfx", "hit.mp3")
-
-    if os.path.exists(whoosh_path):
-        whoosh = AudioFileClip(whoosh_path).volumex(0.4).set_start(0)
-        sfx_clips.append(whoosh)
-        print("Whoosh SFX loaded")
-
-    if os.path.exists(hit_path):
-        hit = AudioFileClip(hit_path).volumex(0.4).set_start(1.5)
-        sfx_clips.append(hit)
-        print("Hit SFX loaded")
-
-# -----------------------------
-# FINAL AUDIO MIX
-# -----------------------------
-final_audio = CompositeAudioClip(
-    [audio.set_start(0.2)] + satb_audio_clips + music_clips + sfx_clips
-)
-video = video.set_audio(final_audio)
-
-# -----------------------------
-# EXPORT
-# -----------------------------
-progress(95, "Exporting final video")
-
-output_file = ...
-
-
-
-
+    print("[RUONEX] SATB soundtrack disabled")
 
 
 
