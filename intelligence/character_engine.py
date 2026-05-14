@@ -25,13 +25,18 @@ class CharacterEngine:
         candidates = re.findall(r"\b[A-Z][a-z]{2,}\b", story)
 
         blacklist = {
-            "The", "As", "But", "And", "With", "Hook", "Why", "What",
-            "Then", "That", "This", "Those", "These", "When", "Where",
-            "Because", "Suddenly", "After", "Before", "Every", "Even",
-            "Darkness", "Within", "Light", "Moon", "Night", "Stars",
-            "Sky", "Sun", "Dawn", "Morning", "Evening", "Village",
-            "Forest", "Beach", "House", "Home",
-        }
+   	    "The", "As", "But", "And", "With", "Hook", "Why", "What",
+    	    "Then", "That", "This", "Those", "These", "When", "Where",
+    	    "Because", "Suddenly", "After", "Before", "Every", "Even",
+    	    "Darkness", "Within", "Light", "Moon", "Night", "Stars",
+    	    "Sky", "Sun", "Dawn", "Morning", "Evening", "Village",
+    	    "Forest", "Beach", "House", "Home",
+
+   	    # NEW FILTERS
+    	    "For", "From", "Into", "Over", "Under",
+    	    "During", "Through", "Weeks", "Days",
+    	    "Months", "Years"
+	}
 
         names = [name for name in candidates if name not in blacklist]
 

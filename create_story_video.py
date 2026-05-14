@@ -252,6 +252,133 @@ def choose_motion_from_mood(mood, motion_choices):
 
 
 # ---------------------------------
+# ADAPTIVE SCENE TIMING ENGINE v2 (music-aware / emotion-aware)
+# ---------------------------------
+
+class TimingEngine:
+
+    def __init__(self):
+        # Base durations (seconds) by narrative phase
+        self.base_scene = {
+            "intro": 7.0,
+            "emotional": 10.0,
+            "tense": 5.0,
+            "climax": 11.0,
+            "resolution": 8.0
+        }
+
+        # Emotion → pacing multiplier (higher = longer scenes)
+        self.emotion_multiplier = {
+            "sad": 1.30,
+            "fear": 0.85,
+            "joy": 1.10,
+            "action": 0.80,
+            "reflective": 1.20,
+            "peaceful": 1.10,
+            "neutral": 1.00
+        }
+
+        # Emotion → shot distribution bias
+        # Values are relative weights for [shot1, shot2, shot3]
+        self.shot_bias = {
+            "sad":        [1.2, 1.4, 0.6],   # linger on character
+            "reflective": [1.1, 1.3, 0.8],
+            "peaceful":   [1.1, 1.2, 0.7],
+            "fear":       [0.9, 1.0, 1.3],   # more emphasis on detail / tension
+            "action":     [0.8, 1.0, 1.4],
+            "joy":        [1.0, 1.2, 0.8],
+            "neutral":    [1.0, 1.1, 0.9],
+        }
+
+    def classify_scene_phase(self, index, total):
+        progress = index / max(total - 1, 1)
+
+        if progress < 0.15:
+            return "intro"
+        elif progress < 0.55:
+            return "emotional"
+        elif progress < 0.80:
+            return "climax"
+        else:
+            return "resolution"
+
+    def _scene_emotion(self, scene_index, shots_per_scene, shot_data_list):
+        """
+        Use the first shot as anchor, but peek at the rest of the scene
+        to get a better emotional 'energy' estimate.
+        """
+        start = scene_index * shots_per_scene
+        end = min(start + shots_per_scene, len(shot_data_list))
+
+        if start >= len(shot_data_list):
+            return "neutral"
+
+        emotions = []
+        for i in range(start, end):
+            emotions.append(str(shot_data_list[i].get("emotion", "neutral")).lower())
+
+        if not emotions:
+            return "neutral"
+
+        # Simple heuristic: prefer non-neutral if present
+        for e in emotions:
+            if e != "neutral":
+                return e
+
+        return emotions[0]
+
+    def build_timing_profile(self, scenes, shot_data_list, shots_per_scene, total_audio_duration):
+        total_scenes = len(scenes)
+        profile = []
+
+        # 1) Compute scene weights based on phase + emotion
+        scene_weights = []
+        total_weight = 0.0
+
+        for i in range(total_scenes):
+            phase = self.classify_scene_phase(i, total_scenes)
+            emotion = self._scene_emotion(i, shots_per_scene, shot_data_list)
+
+            base = self.base_scene.get(phase, 7.0)
+            mult = self.emotion_multiplier.get(emotion, 1.0)
+
+            weight = base * mult
+            scene_weights.append((weight, emotion))
+            total_weight += weight
+
+        if total_weight <= 0:
+            # Fallback: uniform timing
+            uniform_scene_duration = total_audio_duration / max(total_scenes, 1)
+            for _ in range(total_scenes):
+                d = uniform_scene_duration
+                profile.append({
+                    "scene_duration": d,
+                    "shot_durations": [d / 3.0] * 3
+                })
+            return profile
+
+        # 2) Convert weights → actual scene durations
+        for i, (weight, emotion) in enumerate(scene_weights):
+            scene_duration = (weight / total_weight) * total_audio_duration
+
+            # 3) Shot distribution inside scene, biased by emotion
+            bias = self.shot_bias.get(emotion, self.shot_bias["neutral"])
+            b1, b2, b3 = bias
+            b_total = b1 + b2 + b3
+
+            shot1 = scene_duration * (b1 / b_total)
+            shot2 = scene_duration * (b2 / b_total)
+            shot3 = scene_duration * (b3 / b_total)
+
+            profile.append({
+                "scene_duration": scene_duration,
+                "shot_durations": [shot1, shot2, shot3]
+            })
+
+        return profile
+
+
+# ---------------------------------
 # START PIPELINE
 # ---------------------------------
 
@@ -413,66 +540,78 @@ print("Scene images generated")
 # -----------------------------
 progress(65, "Building video timeline")
 
-clips = []
-
 audio = AudioFileClip(audio_path)
 total_audio_duration = audio.duration
 
 scene_count = len(scenes)
 shots_per_scene = SHOTS_PER_SCENE
 
-scene_duration = max(MIN_SCENE_DURATION, total_audio_duration / scene_count)
-shot_duration = scene_duration / shots_per_scene
-
 print(f"Audio duration: {total_audio_duration:.2f} seconds")
 
 motion_choices = ["zoom_in", "zoom_out", "pan_left", "pan_right", "drift"]
 
-for i, img in enumerate(image_paths):
-    shot_data = shot_data_list[i]
-
-    clip = ImageClip(img).set_duration(shot_duration)
-
-    if ENABLE_MOTION:
-        mood = shot_data.get("mood", "")
-        motion = choose_motion_from_mood(mood, motion_choices)
-        clip = add_motion_effect(clip, motion, shot_duration)
-
-    emotion = shot_data.get("emotion", "neutral")
-
-    if emotion == "fear":
-        clip = clip.fx(vfx.colorx, 0.75)
-    elif emotion == "sad":
-        clip = clip.fx(vfx.colorx, 0.85)
-    elif emotion == "joy":
-        clip = clip.fx(vfx.colorx, 1.15)
-    elif emotion == "action":
-        clip = clip.fx(vfx.lum_contrast, lum=0, contrast=25, contrast_thr=127)
-
-    if i > 0 and emotion in ["sad", "fear"]:
-        clip = clip.crossfadein(0.4)
-
-    clip = (
-        clip
-        .fx(vfx.fadein, FADE_DURATION)
-        .fx(vfx.fadeout, FADE_DURATION)
-        .crossfadein(0.15)
-    )
-
-    w, h = clip.size
-    w = w if w % 2 == 0 else w - 1
-    h = h if h % 2 == 0 else h - 1
-    clip = clip.resize((w, h))
-
-    clips.append(clip)
-
-video = concatenate_videoclips(
-    clips,
-    method="compose",
-    padding=-0.15
+timing_engine = TimingEngine()
+timing_profile = timing_engine.build_timing_profile(
+    scenes=scenes,
+    shot_data_list=shot_data_list,
+    shots_per_scene=shots_per_scene,
+    total_audio_duration=total_audio_duration
 )
 
+clips = []
+current_time = 0.0
+
+for scene_index, scene in enumerate(scenes):
+    scene_info = timing_profile[scene_index]
+    shot_durations = scene_info["shot_durations"]
+
+    for shot_index in range(shots_per_scene):
+        global_shot_index = scene_index * shots_per_scene + shot_index
+        if global_shot_index >= len(image_paths):
+            break
+
+        img = image_paths[global_shot_index]
+        shot_data = shot_data_list[global_shot_index]
+
+        duration = shot_durations[shot_index]
+
+        clip = ImageClip(img).set_duration(duration)
+
+        if ENABLE_MOTION:
+            mood = shot_data.get("mood", "")
+            motion = choose_motion_from_mood(mood, motion_choices)
+            clip = add_motion_effect(clip, motion, duration)
+
+        emotion = shot_data.get("emotion", "neutral")
+
+        if emotion == "fear":
+            clip = clip.fx(vfx.colorx, 0.75)
+        elif emotion == "sad":
+            clip = clip.fx(vfx.colorx, 0.85)
+        elif emotion == "joy":
+            clip = clip.fx(vfx.colorx, 1.15)
+        elif emotion == "action":
+            clip = clip.fx(vfx.lum_contrast, lum=0, contrast=25, contrast_thr=127)
+
+        clip = (
+            clip
+            .fx(vfx.fadein, FADE_DURATION)
+            .fx(vfx.fadeout, FADE_DURATION)
+        )
+
+        clip = clip.set_start(current_time)
+        current_time += duration
+
+        w, h = clip.size
+        w = w if w % 2 == 0 else w - 1
+        h = h if h % 2 == 0 else h - 1
+        clip = clip.resize((w, h))
+
+        clips.append(clip)
+
+video = CompositeVideoClip(clips)
 video = video.resize((OUTPUT_WIDTH, OUTPUT_HEIGHT))
+
 
 # -----------------------------
 # HOOK OVERLAY FUNCTION
@@ -659,6 +798,101 @@ if use_satb and satb_stems:
 
 else:
     print("[RUONEX] SATB soundtrack disabled")
+
+# -----------------------------
+# MUSIC
+# -----------------------------
+progress(85, "Adding music and sound effects")
+
+music_clips = []
+
+if ENABLE_MUSIC:
+    for i, scene in enumerate(scenes):
+        emotion = director.detect_emotion(scene, i, len(scenes))
+
+        music_path = generate_music(
+            emotion=emotion,
+            duration=timing_profile[i]["scene_duration"] + 1
+        )
+
+        music_clip = AudioFileClip(music_path).volumex(0.08)
+        music_clip = music_clip.set_start(
+            sum(t["scene_duration"] for t in timing_profile[:i])
+        )
+
+        music_clips.append(music_clip)
+
+    print("Scene-based music generated")
+else:
+    print("Music disabled")
+
+# -----------------------------
+# SOUND EFFECTS
+# -----------------------------
+sfx_clips = []
+
+if ENABLE_SFX:
+    whoosh_path = os.path.join("assets", "sfx", "whoosh.mp3")
+    hit_path = os.path.join("assets", "sfx", "hit.mp3")
+
+    if os.path.exists(whoosh_path):
+        print("Whoosh SFX loaded")
+        whoosh = AudioFileClip(whoosh_path).volumex(0.4).set_start(0)
+        sfx_clips.append(whoosh)
+
+    if os.path.exists(hit_path):
+        print("Hit SFX loaded")
+        hit = AudioFileClip(hit_path).volumex(0.4).set_start(1.5)
+        sfx_clips.append(hit)
+
+    print(f"Total SFX: {len(sfx_clips)}")
+else:
+    print("SFX disabled")
+
+
+# -----------------------------
+# FINAL AUDIO MIX
+# -----------------------------
+final_audio = CompositeAudioClip(
+    [audio.set_start(0.2)]
+    + satb_audio_clips
+    + music_clips
+    + sfx_clips
+)
+
+video = video.set_audio(final_audio)
+
+
+# -----------------------------
+# EXPORT
+# -----------------------------
+progress(95, "Exporting final video")
+
+output_file = EXPORT_FOLDER / (
+    f"{topic.replace(' ', '_')}_{int(time.time())}.mp4"
+)
+
+video.write_videofile(
+    str(output_file),
+    fps=FPS,
+    codec="h264_nvenc",
+    audio_codec="aac",
+    temp_audiofile="temp-audio.m4a",
+    remove_temp=True,
+    preset="fast",
+    ffmpeg_params=[
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart"
+    ]
+)
+
+print("Using codec:", "h264_nvenc")
+
+update_project_json(output_file)
+print("[RUONEX] project.json updated")
+
+progress(100, "Video generation complete")
+
 
 
 
