@@ -485,6 +485,20 @@ progress(40, "Generating cinematic images")
 director = ShotDirector()
 broll_engine = BrollEngine()
 
+# -----------------------------
+# CHARACTER CONSISTENCY
+# -----------------------------
+character_profile = character_engine.get_profile()
+
+character_name = character_profile.get(
+    "name",
+    "main_character"
+)
+
+character_seed = abs(hash(character_name)) % 100000
+
+print(f"[RUONEX] Character seed: {character_seed}")
+
 image_paths = []
 shot_data_list = []
 
@@ -520,11 +534,12 @@ for i, scene in enumerate(scenes):
         else:
             print(f"Generating image {i + 1}-{j + 1}")
             generate_image(
-                prompt=prompt,
-                output_path=image_file,
-                width=IMAGE_WIDTH,
-                height=IMAGE_HEIGHT
-            )
+    		prompt=prompt,
+    		output_path=image_file,
+    		width=IMAGE_WIDTH,
+    		height=IMAGE_HEIGHT,
+    		seed=character_seed
+	    )
 
         image_paths.append(image_file)
         shot_data_list.append(shot_data)

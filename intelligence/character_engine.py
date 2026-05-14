@@ -25,21 +25,20 @@ class CharacterEngine:
         candidates = re.findall(r"\b[A-Z][a-z]{2,}\b", story)
 
         blacklist = {
-   	    "The", "As", "But", "And", "With", "Hook", "Why", "What",
-    	    "Then", "That", "This", "Those", "These", "When", "Where",
-    	    "Because", "Suddenly", "After", "Before", "Every", "Even",
-    	    "Darkness", "Within", "Light", "Moon", "Night", "Stars",
-    	    "Sky", "Sun", "Dawn", "Morning", "Evening", "Village",
-    	    "Forest", "Beach", "House", "Home",
+            "The", "As", "But", "And", "With", "Hook", "Why", "What",
+            "Then", "That", "This", "Those", "These", "When", "Where",
+            "Because", "Suddenly", "After", "Before", "Every", "Even",
+            "Darkness", "Within", "Light", "Moon", "Night", "Stars",
+            "Sky", "Sun", "Dawn", "Morning", "Evening", "Village",
+            "Forest", "Beach", "House", "Home",
 
-   	    # NEW FILTERS
-    	    "For", "From", "Into", "Over", "Under",
-    	    "During", "Through", "Weeks", "Days",
-    	    "Months", "Years"
-	}
+            # NEW FILTERS
+            "For", "From", "Into", "Over", "Under",
+            "During", "Through", "Weeks", "Days",
+            "Months", "Years"
+        }
 
         names = [name for name in candidates if name not in blacklist]
-
         return names
 
     def extract_main_character(self, story: str) -> str:
@@ -49,8 +48,61 @@ class CharacterEngine:
             return "Main Character"
 
         counts = Counter(names)
-
         return counts.most_common(1)[0][0]
+
+    def _resolve_narrative_viewpoint(self, story_lower: str, extracted_name: str):
+        # -----------------------------------
+        # FIRST-PERSON MEMORY / GRIEF STORIES
+        # -----------------------------------
+        first_person = (
+            " i " in f" {story_lower} "
+            or " my " in f" {story_lower} "
+            or " me " in f" {story_lower} "
+        )
+
+        grief_markers = [
+            "passed away", "taken from me", "lost", "memory", "remember",
+            "grief", "grieving", "miss her", "miss him", "cancer",
+            "funeral", "tears"
+        ]
+
+        grief_detected = any(
+            marker in story_lower for marker in grief_markers
+        )
+
+        # If the story is clearly narrated by someone remembering another person,
+        # the narrator becomes the protagonist
+        if first_person and grief_detected:
+            if "mother" in story_lower:
+                return {
+                    "name": "the grieving daughter",
+                    "role": "daughter remembering her late mother",
+                    "forced_gender": "female"
+                }
+
+            if "father" in story_lower:
+                return {
+                    "name": "the grieving son",
+                    "role": "son remembering his late father",
+                    "forced_gender": "male"
+                }
+
+            if "friend" in story_lower:
+                return {
+                    "name": "the grieving friend",
+                    "role": f"person grieving the loss of {extracted_name}"
+                }
+
+            return {
+                "name": "the narrator",
+                "role": "person processing grief and memory"
+            }
+
+        # Otherwise keep extracted character
+        return {
+            "name": extracted_name,
+            "role": None
+        }
 
     def _infer_gender(self, story_lower: str, name: str) -> str:
         female_markers = [
@@ -68,7 +120,6 @@ class CharacterEngine:
 
         if female_score > male_score:
             return "female"
-
         if male_score > female_score:
             return "male"
 
@@ -125,7 +176,6 @@ class CharacterEngine:
 
         if gender == "female":
             return "female protagonist"
-
         if gender == "male":
             return "male protagonist"
 
@@ -196,25 +246,38 @@ class CharacterEngine:
                 ),
                 "consistency_prompt": "",
             }
-
             self.profile["consistency_prompt"] = self._build_consistency_prompt()
             self.character_profile = self.profile["consistency_prompt"]
             return self.profile
 
-        name = self.extract_main_character(story)
+        extracted_name = self.extract_main_character(story)
+
+        viewpoint_data = self._resolve_narrative_viewpoint(
+            story_lower, extracted_name
+        )
+
+        name = viewpoint_data["name"]
 
         # Avoid bad protagonist names
         if name.lower() in ["it", "the", "as", "but", "and"]:
             name = "Main Character"
 
-        gender = self._infer_gender(story_lower, name)
+        # Handle forced gender from viewpoint (grief cases)
+        forced_gender = viewpoint_data.get("forced_gender")
+        if forced_gender:
+            gender = forced_gender
+        else:
+            gender = self._infer_gender(story_lower, name)
+
         age_range = self._infer_age_range(story_lower)
-        role = self._infer_role(story_lower, gender)
+        role = viewpoint_data["role"]
+
+        if not role:
+            role = self._infer_role(story_lower, gender)
+
         emotional_state = self._infer_emotional_state(story_lower)
         visual_description = self._build_visual_description(
-            gender,
-            age_range,
-            role,
+            gender, age_range, role
         )
 
         # First-person stories should not become "I" or "It"
@@ -250,7 +313,6 @@ class CharacterEngine:
     def enhance_prompt(self, scene, prompt):
         if not self.character_profile:
             return prompt
-
         return f"{self.character_profile}, {prompt}"
 
     def get_character_description(self):
@@ -258,8 +320,6 @@ class CharacterEngine:
 
     def get_profile(self):
         return self.profile
-
-
 
 
 

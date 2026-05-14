@@ -28,13 +28,14 @@ def generate_image(
     prompt,
     output_path,
     width=1280,
-    height=720
+    height=720,
+    seed=42
 ):
     pipe = load_model()
 
     generator = torch.Generator(
         device="cuda"
-    ).manual_seed(42)
+    ).manual_seed(seed)
 
     image = pipe(
         prompt=prompt,
@@ -53,9 +54,9 @@ def generate_image(
     image.save(output_path)
 
     print(f"Image saved to {output_path}")
+    print(f"Seed used: {seed}")
 
     return output_path
-
 
 
 
