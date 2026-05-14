@@ -4,6 +4,7 @@ import time
 import pyttsx3
 from pathlib import Path
 import json
+import shutil
 
 from config.settings import *
 from config.topics import TOPICS
@@ -252,13 +253,12 @@ def choose_motion_from_mood(mood, motion_choices):
 
 
 # ---------------------------------
-# ADAPTIVE SCENE TIMING ENGINE v2 (music-aware / emotion-aware)
+# ADAPTIVE SCENE TIMING ENGINE v2
 # ---------------------------------
 
 class TimingEngine:
 
     def __init__(self):
-        # Base durations (seconds) by narrative phase
         self.base_scene = {
             "intro": 7.0,
             "emotional": 10.0,
@@ -267,7 +267,6 @@ class TimingEngine:
             "resolution": 8.0
         }
 
-        # Emotion → pacing multiplier (higher = longer scenes)
         self.emotion_multiplier = {
             "sad": 1.30,
             "fear": 0.85,
@@ -278,13 +277,11 @@ class TimingEngine:
             "neutral": 1.00
         }
 
-        # Emotion → shot distribution bias
-        # Values are relative weights for [shot1, shot2, shot3]
         self.shot_bias = {
-            "sad":        [1.2, 1.4, 0.6],   # linger on character
+            "sad":        [1.2, 1.4, 0.6],
             "reflective": [1.1, 1.3, 0.8],
             "peaceful":   [1.1, 1.2, 0.7],
-            "fear":       [0.9, 1.0, 1.3],   # more emphasis on detail / tension
+            "fear":       [0.9, 1.0, 1.3],
             "action":     [0.8, 1.0, 1.4],
             "joy":        [1.0, 1.2, 0.8],
             "neutral":    [1.0, 1.1, 0.9],
@@ -303,10 +300,6 @@ class TimingEngine:
             return "resolution"
 
     def _scene_emotion(self, scene_index, shots_per_scene, shot_data_list):
-        """
-        Use the first shot as anchor, but peek at the rest of the scene
-        to get a better emotional 'energy' estimate.
-        """
         start = scene_index * shots_per_scene
         end = min(start + shots_per_scene, len(shot_data_list))
 
@@ -320,7 +313,6 @@ class TimingEngine:
         if not emotions:
             return "neutral"
 
-        # Simple heuristic: prefer non-neutral if present
         for e in emotions:
             if e != "neutral":
                 return e
@@ -331,7 +323,6 @@ class TimingEngine:
         total_scenes = len(scenes)
         profile = []
 
-        # 1) Compute scene weights based on phase + emotion
         scene_weights = []
         total_weight = 0.0
 
@@ -347,7 +338,6 @@ class TimingEngine:
             total_weight += weight
 
         if total_weight <= 0:
-            # Fallback: uniform timing
             uniform_scene_duration = total_audio_duration / max(total_scenes, 1)
             for _ in range(total_scenes):
                 d = uniform_scene_duration
@@ -357,11 +347,9 @@ class TimingEngine:
                 })
             return profile
 
-        # 2) Convert weights → actual scene durations
         for i, (weight, emotion) in enumerate(scene_weights):
             scene_duration = (weight / total_weight) * total_audio_duration
 
-            # 3) Shot distribution inside scene, biased by emotion
             bias = self.shot_bias.get(emotion, self.shot_bias["neutral"])
             b1, b2, b3 = bias
             b_total = b1 + b2 + b3
@@ -482,22 +470,19 @@ print("Local voice narration created")
 # -----------------------------
 progress(40, "Generating cinematic images")
 
-director = ShotDirector()
+director = ShotDirector(video_style="music_video")
 broll_engine = BrollEngine()
 
-# -----------------------------
-# CHARACTER CONSISTENCY
-# -----------------------------
 character_profile = character_engine.get_profile()
-
-character_name = character_profile.get(
-    "name",
-    "main_character"
-)
-
+character_name = character_profile.get("name", "main_character")
 character_seed = abs(hash(character_name)) % 100000
 
 print(f"[RUONEX] Character seed: {character_seed}")
+
+# Character reference system
+CHARACTER_REF_DIR = PROJECT_DIR / "characters"
+CHARACTER_REF_DIR.mkdir(parents=True, exist_ok=True)
+main_character_ref = CHARACTER_REF_DIR / "main_character.png"
 
 image_paths = []
 shot_data_list = []
@@ -534,12 +519,17 @@ for i, scene in enumerate(scenes):
         else:
             print(f"Generating image {i + 1}-{j + 1}")
             generate_image(
-    		prompt=prompt,
-    		output_path=image_file,
-    		width=IMAGE_WIDTH,
-    		height=IMAGE_HEIGHT,
-    		seed=character_seed
-	    )
+                prompt=prompt,
+                output_path=image_file,
+                width=IMAGE_WIDTH,
+                height=IMAGE_HEIGHT,
+                seed=character_seed
+            )
+
+        # Save first protagonist image as reference
+        if not main_character_ref.exists() and j == 1:
+            shutil.copy(image_file, main_character_ref)
+            print(f"[RUONEX] Saved character reference: {main_character_ref}")
 
         image_paths.append(image_file)
         shot_data_list.append(shot_data)
@@ -558,9 +548,6 @@ progress(65, "Building video timeline")
 audio = AudioFileClip(audio_path)
 total_audio_duration = audio.duration
 
-scene_count = len(scenes)
-shots_per_scene = SHOTS_PER_SCENE
-
 print(f"Audio duration: {total_audio_duration:.2f} seconds")
 
 motion_choices = ["zoom_in", "zoom_out", "pan_left", "pan_right", "drift"]
@@ -569,7 +556,7 @@ timing_engine = TimingEngine()
 timing_profile = timing_engine.build_timing_profile(
     scenes=scenes,
     shot_data_list=shot_data_list,
-    shots_per_scene=shots_per_scene,
+    shots_per_scene=SHOTS_PER_SCENE,
     total_audio_duration=total_audio_duration
 )
 
@@ -580,43 +567,48 @@ for scene_index, scene in enumerate(scenes):
     scene_info = timing_profile[scene_index]
     shot_durations = scene_info["shot_durations"]
 
-    for shot_index in range(shots_per_scene):
-        global_shot_index = scene_index * shots_per_scene + shot_index
+    for shot_index in range(SHOTS_PER_SCENE):
+        global_shot_index = scene_index * SHOTS_PER_SCENE + shot_index
         if global_shot_index >= len(image_paths):
             break
 
         img = image_paths[global_shot_index]
         shot_data = shot_data_list[global_shot_index]
 
-        duration = shot_durations[shot_index]
+        duration = shot_durations[shot_index] * 0.92   # snappier music-video feel
 
         clip = ImageClip(img).set_duration(duration)
 
         if ENABLE_MOTION:
             mood = shot_data.get("mood", "")
             motion = choose_motion_from_mood(mood, motion_choices)
+
+            if motion in ["zoom_in", "slow_pan"] and random.random() < 0.5:
+                motion = "drift"
+
             clip = add_motion_effect(clip, motion, duration)
 
         emotion = shot_data.get("emotion", "neutral")
 
         if emotion == "fear":
-            clip = clip.fx(vfx.colorx, 0.75)
+            clip = clip.fx(vfx.colorx, 0.78)
         elif emotion == "sad":
-            clip = clip.fx(vfx.colorx, 0.85)
+            clip = clip.fx(vfx.colorx, 0.88)
         elif emotion == "joy":
-            clip = clip.fx(vfx.colorx, 1.15)
+            clip = clip.fx(vfx.colorx, 1.12)
         elif emotion == "action":
-            clip = clip.fx(vfx.lum_contrast, lum=0, contrast=25, contrast_thr=127)
+            clip = clip.fx(vfx.lum_contrast, lum=0, contrast=22, contrast_thr=127)
 
         clip = (
             clip
-            .fx(vfx.fadein, FADE_DURATION)
-            .fx(vfx.fadeout, FADE_DURATION)
+            .fx(vfx.fadein, FADE_DURATION * 0.75)
+            .fx(vfx.fadeout, FADE_DURATION * 0.75)
         )
 
         clip = clip.set_start(current_time)
         current_time += duration
 
+        # Ensure even dimensions
         w, h = clip.size
         w = w if w % 2 == 0 else w - 1
         h = h if h % 2 == 0 else h - 1
@@ -642,7 +634,6 @@ def create_hook_text(text):
 
     words = text.upper().split()
     mid = len(words) // 2
-
     line1 = " ".join(words[:mid])
     line2 = " ".join(words[mid:])
 
@@ -654,7 +645,6 @@ def create_hook_text(text):
         stroke_width=4,
         stroke_fill="black"
     )
-
     draw.text(
         (int(OUTPUT_WIDTH * 0.08), int(OUTPUT_HEIGHT * 0.48)),
         line2,
@@ -669,6 +659,7 @@ def create_hook_text(text):
 
 satb_stems = detect_satb_stems()
 
+
 # -----------------------------
 # HOOK + CAPTIONS
 # -----------------------------
@@ -676,16 +667,15 @@ progress(75, "Adding hook overlay and captions")
 
 if ENABLE_HOOK:
     hook_img = create_hook_text(hook_text)
-
     hook_clip = (
         ImageClip(hook_img)
         .set_start(0)
         .set_duration(2.0)
         .set_position(("center", "center"))
     )
-
     video = CompositeVideoClip([video, hook_clip])
     print("Hook overlay added")
+
 
 if ENABLE_CAPTIONS and CAPTION_MODE == "FAST":
 
@@ -706,7 +696,6 @@ if ENABLE_CAPTIONS and CAPTION_MODE == "FAST":
             stroke_width=3,
             stroke_fill="black"
         )
-
         return np.array(img)
 
     words = narration_text.split()
@@ -715,8 +704,7 @@ if ENABLE_CAPTIONS and CAPTION_MODE == "FAST":
         for i in range(0, len(words), CAPTION_GROUP_SIZE)
     ]
 
-    group_duration = video.duration / len(groups)
-
+    group_duration = video.duration / max(len(groups), 1)
     caption_clips = []
 
     for i, text in enumerate(groups):
@@ -739,13 +727,13 @@ if ENABLE_CAPTIONS and CAPTION_MODE == "FAST":
 elif ENABLE_CAPTIONS and CAPTION_MODE == "WHISPER":
     print("Whisper captions not yet implemented")
 
+
 # -----------------------------
 # SATB SOUNDTRACK LAYER
 # -----------------------------
 satb_audio_clips = []
 
 satb_intensity = get_satb_intensity_from_shots(shot_data_list)
-
 project_data = load_project_json()
 
 use_satb = (
@@ -755,41 +743,30 @@ use_satb = (
 )
 
 if use_satb and satb_stems:
-
     print("[RUONEX] Loading SATB soundtrack")
 
     satb_config = project_data.get("satb_soundtrack", {})
 
-    satb_volume = satb_config.get("volume", 0.035)
     satb_ducking_volume = satb_config.get("ducking_volume", 0.018)
     satb_fade_in = satb_config.get("fade_in", 2.0)
     satb_fade_out = satb_config.get("fade_out", 2.0)
 
-    satb_curve_multiplier = get_story_curve_multiplier(
-        shot_data_list,
-        satb_config
-    )
+    satb_curve_multiplier = get_story_curve_multiplier(shot_data_list, satb_config)
 
     print(f"[RUONEX] SATB curve multiplier: {satb_curve_multiplier:.2f}")
 
     dominant_emotion = "neutral"
-
     if shot_data_list:
-        dominant_emotion = str(
-            shot_data_list[0].get("emotion", "neutral")
-        ).lower()
+        dominant_emotion = str(shot_data_list[0].get("emotion", "neutral")).lower()
 
     voice_weights = get_emotional_voice_weights(dominant_emotion)
-
     print(f"[RUONEX] Dominant emotion: {dominant_emotion}")
 
     for part, path in satb_stems.items():
-
         voice_multiplier = voice_weights.get(part, 1.0)
 
         try:
             choir_clip = AudioFileClip(str(path))
-
             choir_volume = (
                 satb_ducking_volume
                 * satb_intensity
@@ -802,11 +779,7 @@ if use_satb and satb_stems:
             choir_clip = choir_clip.audio_fadeout(satb_fade_out)
 
             satb_audio_clips.append(choir_clip)
-
-            print(
-                f"[RUONEX] Loaded {part} soundtrack "
-                f"(x{voice_multiplier})"
-            )
+            print(f"[RUONEX] Loaded {part} soundtrack (x{voice_multiplier})")
 
         except Exception as e:
             print(f"[RUONEX] Failed loading {part}: {e}")
@@ -814,8 +787,9 @@ if use_satb and satb_stems:
 else:
     print("[RUONEX] SATB soundtrack disabled")
 
+
 # -----------------------------
-# MUSIC
+# MUSIC + SFX
 # -----------------------------
 progress(85, "Adding music and sound effects")
 
@@ -824,26 +798,20 @@ music_clips = []
 if ENABLE_MUSIC:
     for i, scene in enumerate(scenes):
         emotion = director.detect_emotion(scene, i, len(scenes))
-
         music_path = generate_music(
             emotion=emotion,
             duration=timing_profile[i]["scene_duration"] + 1
         )
-
         music_clip = AudioFileClip(music_path).volumex(0.08)
         music_clip = music_clip.set_start(
             sum(t["scene_duration"] for t in timing_profile[:i])
         )
-
         music_clips.append(music_clip)
-
     print("Scene-based music generated")
 else:
     print("Music disabled")
 
-# -----------------------------
-# SOUND EFFECTS
-# -----------------------------
+
 sfx_clips = []
 
 if ENABLE_SFX:
@@ -851,12 +819,10 @@ if ENABLE_SFX:
     hit_path = os.path.join("assets", "sfx", "hit.mp3")
 
     if os.path.exists(whoosh_path):
-        print("Whoosh SFX loaded")
         whoosh = AudioFileClip(whoosh_path).volumex(0.4).set_start(0)
         sfx_clips.append(whoosh)
 
     if os.path.exists(hit_path):
-        print("Hit SFX loaded")
         hit = AudioFileClip(hit_path).volumex(0.4).set_start(1.5)
         sfx_clips.append(hit)
 
@@ -869,10 +835,7 @@ else:
 # FINAL AUDIO MIX
 # -----------------------------
 final_audio = CompositeAudioClip(
-    [audio.set_start(0.2)]
-    + satb_audio_clips
-    + music_clips
-    + sfx_clips
+    [audio.set_start(0.2)] + satb_audio_clips + music_clips + sfx_clips
 )
 
 video = video.set_audio(final_audio)
@@ -907,7 +870,3 @@ update_project_json(output_file)
 print("[RUONEX] project.json updated")
 
 progress(100, "Video generation complete")
-
-
-
-
